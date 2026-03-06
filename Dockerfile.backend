@@ -1,0 +1,32 @@
+# ---- Build Stage ----
+FROM maven:3.9-eclipse-temurin-21 AS build
+WORKDIR /app
+
+COPY backend/pom.xml ./backend/
+COPY proto/ ./proto/
+
+# Download dependencies first (cached layer)
+WORKDIR /app/backend
+RUN mvn dependency:go-offline -B
+
+# Copy source and build
+COPY backend/src ./src
+RUN mvn clean package -DskipTests -B
+
+# ---- Runtime Stage ----
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+
+RUN addgroup -S minidb && adduser -S minidb -G minidb
+RUN mkdir -p /app/data && chown -R minidb:minidb /app
+
+COPY --from=build /app/backend/target/*-boot.jar app.jar
+
+USER minidb
+
+EXPOSE 8080 9090
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
+
+ENTRYPOINT ["java", "-XX:+UseZGC", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]

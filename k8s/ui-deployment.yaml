@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minidb-ui
+  namespace: minidb
+  labels:
+    app: minidb-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minidb-ui
+  template:
+    metadata:
+      labels:
+        app: minidb-ui
+    spec:
+      containers:
+        - name: ui
+          image: minidb-frontend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "64Mi"
+            limits:
+              cpu: "250m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minidb-ui
+  namespace: minidb
+spec:
+  type: NodePort
+  selector:
+    app: minidb-ui
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30300

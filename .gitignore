@@ -1,0 +1,42 @@
+# Java / Maven
+backend/target/
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+
+# RocksDB data
+backend/data/
+data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node.js
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Logs
+*.log
+logs/
+
+# Cluster scripts runtime
+.cluster-pids
+
+# Environment
+.env
+.env.local
+
+# Docker volumes
+prometheus-data/
+grafana-data/

@@ -1,0 +1,51 @@
+# Mini Distributed Database - Application Configuration
+spring:
+  application:
+    name: mini-distributed-db
+
+# Server configuration
+server:
+  port: ${SERVER_PORT:8080}
+
+# gRPC server configuration
+grpc:
+  server:
+    port: ${GRPC_SERVER_PORT:9090}
+
+# MiniDB Configuration
+minidb:
+  node:
+    id: ${NODE_ID:node-1}
+  cluster:
+    peers: ${CLUSTER_PEERS:}
+  storage:
+    path: ${STORAGE_PATH:data/rocksdb-${NODE_ID:node-1}}
+  raft:
+    election-timeout-min: ${ELECTION_TIMEOUT_MIN:3000}
+    election-timeout-max: ${ELECTION_TIMEOUT_MAX:5000}
+    heartbeat-interval: ${HEARTBEAT_INTERVAL:1000}
+    snapshot-interval: ${SNAPSHOT_INTERVAL:1000}
+  mvcc:
+    retention-ms: ${MVCC_RETENTION_MS:300000}
+    gc-interval-ms: ${MVCC_GC_INTERVAL_MS:60000}
+
+# Actuator & Prometheus
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus,info,metrics
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: ${spring.application.name}
+      node: ${minidb.node.id}
+
+# Logging
+logging:
+  level:
+    com.minidb: INFO
+    com.minidb.raft: DEBUG
+    com.minidb.grpc: INFO

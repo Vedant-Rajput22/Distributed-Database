@@ -1,0 +1,117 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "title": "Raft Term",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [{ "expr": "raft_term", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" } } }
+    },
+    {
+      "title": "Raft Role",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "raft_role_info", "legendFormat": "{{instance}} = {{role}}" }]
+    },
+    {
+      "title": "Elections Total",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "raft_elections_total", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "color": { "fixedColor": "red", "mode": "fixed" } } }
+    },
+    {
+      "title": "Log Entries",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "targets": [{ "expr": "raft_log_entries_total", "legendFormat": "{{instance}}" }]
+    },
+    {
+      "title": "Commit Index",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "targets": [{ "expr": "raft_commit_index", "legendFormat": "{{instance}}" }]
+    },
+    {
+      "title": "Last Applied",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "targets": [{ "expr": "raft_last_applied", "legendFormat": "{{instance}}" }]
+    },
+    {
+      "title": "KV Operations Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "rate(kv_operations_total[1m])", "legendFormat": "{{instance}} {{operation}}" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 10 } } }
+    },
+    {
+      "title": "KV Operation Latency",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(kv_operation_latency_seconds_bucket[1m]))", "legendFormat": "p50 {{instance}}" },
+        { "expr": "histogram_quantile(0.95, rate(kv_operation_latency_seconds_bucket[1m]))", "legendFormat": "p95 {{instance}}" },
+        { "expr": "histogram_quantile(0.99, rate(kv_operation_latency_seconds_bucket[1m]))", "legendFormat": "p99 {{instance}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line" } } }
+    },
+    {
+      "title": "Raft Term Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 12 },
+      "targets": [{ "expr": "raft_term", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "staircase": true } } }
+    },
+    {
+      "title": "Elections Over Time",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 12 },
+      "targets": [{ "expr": "increase(raft_elections_total[1m])", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "bars" } } }
+    },
+    {
+      "title": "Log Growth",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 12 },
+      "targets": [{ "expr": "raft_log_entries_total", "legendFormat": "{{instance}}" }],
+      "fieldConfig": { "defaults": { "custom": { "drawStyle": "line", "fillOpacity": 15 } } }
+    },
+    {
+      "title": "JVM Memory Usage",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "jvm_memory_used_bytes{area=\"heap\"}", "legendFormat": "{{instance}} heap" },
+        { "expr": "jvm_memory_used_bytes{area=\"nonheap\"}", "legendFormat": "{{instance}} non-heap" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "title": "GC Pause Duration",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "rate(jvm_gc_pause_seconds_sum[1m])", "legendFormat": "{{instance}} {{cause}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["minidb", "raft", "distributed"],
+  "templating": { "list": [] },
+  "time": { "from": "now-15m", "to": "now" },
+  "title": "Mini Distributed Database",
+  "uid": "minidb-dashboard"
+}

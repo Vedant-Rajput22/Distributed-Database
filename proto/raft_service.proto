@@ -1,0 +1,76 @@
+syntax = "proto3";
+
+package minidb;
+
+option java_multiple_files = true;
+option java_package = "com.minidb.proto";
+option java_outer_classname = "RaftServiceProto";
+
+// Raft Consensus RPCs
+service RaftService {
+  // Invoked by candidates to gather votes
+  rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
+  // Invoked by leader for log replication and heartbeats
+  rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
+  // Invoked by leader to send snapshot to slow followers
+  rpc InstallSnapshot(InstallSnapshotRequest) returns (InstallSnapshotResponse);
+}
+
+message RequestVoteRequest {
+  int64 term = 1;
+  string candidate_id = 2;
+  int64 last_log_index = 3;
+  int64 last_log_term = 4;
+}
+
+message RequestVoteResponse {
+  int64 term = 1;
+  bool vote_granted = 2;
+}
+
+message LogEntry {
+  int64 index = 1;
+  int64 term = 2;
+  CommandType command_type = 3;
+  string key = 4;
+  bytes value = 5;
+  string txn_id = 6;
+}
+
+enum CommandType {
+  NOOP = 0;
+  PUT = 1;
+  DELETE = 2;
+  TXN_PREPARE = 3;
+  TXN_COMMIT = 4;
+  TXN_ABORT = 5;
+}
+
+message AppendEntriesRequest {
+  int64 term = 1;
+  string leader_id = 2;
+  int64 prev_log_index = 3;
+  int64 prev_log_term = 4;
+  repeated LogEntry entries = 5;
+  int64 leader_commit = 6;
+}
+
+message AppendEntriesResponse {
+  int64 term = 1;
+  bool success = 2;
+  int64 match_index = 3; // optimization: follower's last matching index
+}
+
+message InstallSnapshotRequest {
+  int64 term = 1;
+  string leader_id = 2;
+  int64 last_included_index = 3;
+  int64 last_included_term = 4;
+  int64 offset = 5;
+  bytes data = 6;
+  bool done = 7;
+}
+
+message InstallSnapshotResponse {
+  int64 term = 1;
+}

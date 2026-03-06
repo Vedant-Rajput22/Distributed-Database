@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package minidb;
+
+option java_multiple_files = true;
+option java_package = "com.minidb.proto";
+option java_outer_classname = "KvServiceProto";
+
+// Key-Value Service API
+service KvService {
+  // Store a key-value pair
+  rpc Put(PutRequest) returns (PutResponse);
+  // Retrieve a value by key
+  rpc Get(GetRequest) returns (GetResponse);
+  // Consistent (linearizable) read
+  rpc ConsistentGet(GetRequest) returns (GetResponse);
+  // Delete a key (tombstone)
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+  // Range scan
+  rpc Scan(ScanRequest) returns (ScanResponse);
+}
+
+message PutRequest {
+  string key = 1;
+  bytes value = 2;
+  string txn_id = 3; // optional, for 2PC transactions
+}
+
+message PutResponse {
+  bool success = 1;
+  string error = 2;
+  int64 timestamp = 3;
+}
+
+message GetRequest {
+  string key = 1;
+  int64 timestamp = 2; // 0 means latest
+}
+
+message GetResponse {
+  bool found = 1;
+  bytes value = 2;
+  int64 timestamp = 3;
+  string error = 4;
+}
+
+message DeleteRequest {
+  string key = 1;
+  string txn_id = 2;
+}
+
+message DeleteResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message ScanRequest {
+  string start_key = 1;
+  string end_key = 2;
+  int32 limit = 3;
+  int64 timestamp = 4; // 0 means latest
+}
+
+message ScanResponse {
+  repeated KvPair pairs = 1;
+  string error = 2;
+}
+
+message KvPair {
+  string key = 1;
+  bytes value = 2;
+  int64 timestamp = 3;
+}
