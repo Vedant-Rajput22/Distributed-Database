@@ -69,6 +69,7 @@ A **production-grade distributed key-value store** built entirely from scratch w
   - [Dashboard Testing Walkthrough](#dashboard-testing-walkthrough)
   - [Chaos Scenarios to Try](#chaos-scenarios-to-try)
 - [Design Decisions & Trade-offs](#design-decisions--trade-offs)
+- [Demo App: RaftChat](#demo-app-raftchat)
 
 ---
 
@@ -958,6 +959,7 @@ That's it! The script will:
 | `-Nodes 5` / `-n 5`           | Start up to 5 nodes instead of 3      |
 | `-SkipBuild` / `--skip-build` | Skip Maven build (reuse existing JAR) |
 | `-SkipFrontend` / `--skip-ui` | Don't start the React dashboard       |
+| `-WithDemo` / `--with-demo`   | Also start the RaftChat demo app      |
 
 **Stopping the cluster:**
 
@@ -974,6 +976,8 @@ That's it! The script will:
 All node logs are saved to the `logs/` directory for debugging.
 
 **Dashboard:** http://localhost:3000 — a leader will be elected within ~10 seconds.
+
+**RaftChat Demo App:** http://localhost:4000 — launch with `-WithDemo` / `--with-demo` flag.
 
 ---
 
@@ -1319,6 +1323,62 @@ Tests cover:
 | 3   | **Majority Failure**  | Kill 2 nodes → try PUT → Recover all                                  | Writes fail (no quorum); writes resume after recovery              |
 | 4   | **Network Partition** | Partition the leader → wait → Heal                                    | Partitioned leader steps down; new leader elected; heal reconciles |
 | 5   | **Rolling Restart**   | Kill node-1 → recover → Kill node-2 → recover → Kill node-3 → recover | Cluster stays available throughout (always have quorum)            |
+
+---
+
+## Demo App: RaftChat
+
+A **Discord-like distributed chat application** built entirely on the Mini Distributed Database to showcase Raft replication, fault tolerance, and MVCC versioning in a real-world scenario.
+
+### Quick Start
+
+```powershell
+# Windows — start cluster + demo app
+.\start-cluster.ps1 -WithDemo
+
+# Linux / macOS
+./start-cluster.sh --with-demo
+```
+
+Open **http://localhost:4000** and start chatting!
+
+### What It Demonstrates
+
+| Feature                 | How It Works                                                                        |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| **Message Replication** | Every message is written via Raft consensus — all 3 nodes store the same data       |
+| **Fault Tolerance**     | Kill a node from the sidebar → messages are still delivered via surviving nodes     |
+| **MVCC Edit History**   | Edit a message → click "(edited)" to view all previous versions stored by MVCC      |
+| **Leader Forwarding**   | Send a message while connected to a killed node — it's HTTP-forwarded to the leader |
+| **Node Switching**      | Click any node in the sidebar to connect directly and read its local state          |
+| **Stale Reads**         | Connect to a killed node → see its data frozen at the point it was killed           |
+
+### Demo Walkthrough
+
+1. **Launch** — Pick a user (Vedant, Alice, Bob, or Charlie) or type a custom name
+2. **Send messages** in `#general`, `#random`, or `#tech-talk` channels
+3. **Switch users** from the bottom of the sidebar to simulate multi-user chat
+4. **Kill a node** from the Cluster Nodes panel — see it go red
+5. **Keep chatting** — messages still replicate on the 2 surviving nodes
+6. **Recover the node** — it catches up with all missed messages
+7. **Edit a message** — hover over your own message → click the pencil icon
+8. **View MVCC history** — click "(edited)" to see the full version timeline
+9. **Seed demo data** — click the sparkle button in the sidebar for sample messages
+
+### Architecture
+
+```
+┌─────────────────┐      ┌──────────────────────────────────────────┐
+│   RaftChat UI   │─────>│  Mini Distributed Database (3 nodes)     │
+│  localhost:4000 │ HTTP │  Raft consensus + MVCC + RocksDB         │
+│  React + Vite   │<─────│  Data replicated across all nodes        │
+└─────────────────┘      └──────────────────────────────────────────┘
+```
+
+- **Messages** are stored as KV pairs: `chat:{channel}:{timestamp}:{id}` → JSON value
+- **Channels** are just key prefixes — scanning `chat:general` returns all #general messages
+- **Edit history** uses the MVCC version API (`/api/kv/versions/{key}`)
+- **Chaos controls** call `/api/chaos/kill-node/{id}` and `/api/chaos/recover/{id}`
 
 ---
 

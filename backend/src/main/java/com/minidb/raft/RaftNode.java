@@ -59,9 +59,14 @@ public class RaftNode {
     private final ElectionTimer electionTimer;
     private final SnapshotManager snapshotManager;
     private final ReentrantLock lock = new ReentrantLock();
+    // Separate lightweight lock for log appends — avoids contention with main Raft lock
+    private final ReentrantLock appendLock = new ReentrantLock();
 
     // Client request tracking: logIndex -> CompletableFuture
     private final Map<Long, CompletableFuture<Boolean>> pendingRequests = new ConcurrentHashMap<>();
+
+    // Speculative commit tracking: logIndex -> callback to run on commit
+    private final Map<Long, Runnable> speculativeCommitCallbacks = new ConcurrentHashMap<>();
 
     // Peer communication (set by gRPC service)
     private volatile RaftPeerClient peerClient;
@@ -74,6 +79,23 @@ public class RaftNode {
     private final Map<String, Long> peerLastSeen = new ConcurrentHashMap<>();
     private final Map<String, Boolean> peerAlive = new ConcurrentHashMap<>();
     private static final long PEER_DEAD_THRESHOLD_MS = 5000; // 5 seconds without contact = dead
+
+    // ====================================================================
+    // Write Batching — Optimized Raft Baseline (Reviewer Challenge §4)
+    // ====================================================================
+    // Instead of calling sendHeartbeats() after every single submitCommand(),
+    // we coalesce replication RPCs within a short window. Multiple concurrent
+    // writes that arrive within BATCH_WINDOW_MICROS are combined into a single
+    // AppendEntries RPC per peer — matching production Raft implementations
+    // (etcd, CockroachDB) for a fair baseline comparison.
+    //
+    // When batchingEnabled=true:  submitCommand() schedules a delayed flush
+    // When batchingEnabled=false: submitCommand() flushes immediately (original behavior)
+    // ====================================================================
+    private volatile boolean batchingEnabled = true;
+    private static final long BATCH_WINDOW_MICROS = 500; // 0.5ms batch window (etcd uses ~1ms)
+    private volatile ScheduledFuture<?> pendingBatchFlush = null;
+    private final Object batchFlushLock = new Object();
 
     // Metrics
     private final Counter electionsTotal;
@@ -364,8 +386,15 @@ public class RaftNode {
             }
             int majority = (config.getPeers().size() + 1) / 2 + 1;
             if (replicatedCount >= majority) {
+                long oldCommitIndex = commitIndex;
                 commitIndex = n;
                 log.debug("[{}] Advanced commitIndex to {}", config.getNodeId(), commitIndex);
+                // Event-driven commit application: process newly committed entries
+                // immediately instead of waiting for the 10ms polling interval.
+                // This is the key fix for promotion latency.
+                if (commitIndex > oldCommitIndex) {
+                    applyCommittedEntries();
+                }
                 break;
             }
         }
@@ -565,8 +594,14 @@ public class RaftNode {
             CompletableFuture<Boolean> future = new CompletableFuture<>();
             pendingRequests.put(entry.index(), future);
 
-            // Trigger immediate replication
-            sendHeartbeats();
+            // Coalesced replication: batch multiple writes within a short window
+            // into a single AppendEntries RPC per peer (Challenge §4: Baseline Fairness)
+            if (batchingEnabled) {
+                scheduleBatchFlush();
+            } else {
+                // Immediate replication (original behavior)
+                sendHeartbeats();
+            }
 
             // Timeout pending requests
             CompletableFuture.delayedExecutor(5, TimeUnit.SECONDS)
@@ -576,6 +611,26 @@ public class RaftNode {
             return future;
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * Schedule a coalesced replication flush within BATCH_WINDOW_MICROS.
+     * If a flush is already scheduled, skip — the pending flush will pick up
+     * all entries accumulated since the last flush.
+     *
+     * <p>This models production Raft implementations (etcd batches at ~1ms)
+     * and ensures baseline benchmark fairness (Reviewer Challenge §4).</p>
+     */
+    private void scheduleBatchFlush() {
+        synchronized (batchFlushLock) {
+            if (pendingBatchFlush == null || pendingBatchFlush.isDone()) {
+                pendingBatchFlush = scheduler.schedule(() -> {
+                    if (role == Role.LEADER && !killed) {
+                        sendHeartbeats();
+                    }
+                }, BATCH_WINDOW_MICROS, TimeUnit.MICROSECONDS);
+            }
         }
     }
 
@@ -647,6 +702,86 @@ public class RaftNode {
     }
 
     // ============================================================
+    // Speculative Write Infrastructure
+    // ============================================================
+
+    /**
+     * Append a command to the Raft log WITHOUT blocking for replication.
+     * Used by SpeculativeManager to get the log index before writing to MVCC.
+     *
+     * <p>Uses a dedicated {@code appendLock} instead of the main Raft lock to
+     * minimize contention on the speculative hot path. The main lock is used
+     * for state transitions (elections, stepDown) which are rare; appends are
+     * the high-frequency operation.</p>
+     *
+     * @return the log index, or -1 if not leader/killed
+     */
+    public long appendToLog(RaftLog.CommandType type, String key, byte[] value) {
+        if (role != Role.LEADER || killed) return -1;
+
+        appendLock.lock();
+        try {
+            RaftLog.Entry entry = new RaftLog.Entry(
+                    raftLog.getLastIndex() + 1, currentTerm, type, key, value);
+            raftLog.append(entry);
+            logEntriesTotal.increment();
+            return entry.index();
+        } finally {
+            appendLock.unlock();
+        }
+    }
+
+    /**
+     * Register a callback to be invoked when a speculative write at the given
+     * log index is committed by Raft consensus (majority ACK).
+     *
+     * <p><b>Race-condition fix:</b> Between {@code appendToLog()} and this
+     * registration, a concurrent heartbeat/replication cycle can commit the
+     * entry via {@code applyCommittedEntries()}, which finds no callback and
+     * falls through to {@code applyEntry()}. The callback would then stay
+     * orphaned and eventually time out — creating a false rollback.</p>
+     *
+     * <p>To prevent this, after registration we check if the entry has already
+     * been applied ({@code logIndex <= lastApplied}). If so, we fire the
+     * callback immediately. ConcurrentHashMap's thread-safety guarantees
+     * prevent double-execution: if {@code applyCommittedEntries()} already
+     * removed and ran the callback, our {@code remove()} returns null.</p>
+     */
+    public void trackSpeculativeCommit(long logIndex, Runnable onCommit) {
+        speculativeCommitCallbacks.put(logIndex, onCommit);
+
+        // Fix race: entry may already be committed + applied before we registered.
+        // If so, applyCommittedEntries() found no callback and used applyEntry().
+        // Fire the callback now to complete the future and prevent false rollback.
+        if (logIndex <= lastApplied) {
+            Runnable cb = speculativeCommitCallbacks.remove(logIndex);
+            if (cb != null) {
+                try {
+                    cb.run();
+                } catch (Exception e) {
+                    log.error("[{}] Late speculative callback fired at index {}: {}",
+                            config.getNodeId(), logIndex, e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Trigger coalesced replication to all peers (non-blocking).
+     * Called by SpeculativeManager after appending a speculative entry.
+     *
+     * <p>Uses the same batching window as standard writes to avoid
+     * redundant gRPC calls when multiple speculative writes arrive
+     * concurrently. This eliminates the "replication storm" that
+     * caused p95 tail latency spikes.</p>
+     */
+    public void triggerReplication() {
+        if (role == Role.LEADER && !killed) {
+            scheduleBatchFlush();
+        }
+    }
+
+    // ============================================================
     // State Machine Application
     // ============================================================
 
@@ -658,7 +793,22 @@ public class RaftNode {
             RaftLog.Entry entry = raftLog.getEntry(lastApplied);
             if (entry == null) break;
 
-            applyEntry(entry);
+            // Fire speculative commit callback INSTEAD of applying to MVCC
+            // (speculative path already wrote the value — just promote it)
+            Runnable specCallback = speculativeCommitCallbacks.remove(entry.index());
+            if (specCallback != null) {
+                try {
+                    specCallback.run();
+                } catch (Exception e) {
+                    log.error("[{}] Speculative callback failed at index {}: {}",
+                            config.getNodeId(), entry.index(), e.getMessage());
+                    // Callback failed but entry IS committed — apply normally as fallback
+                    applyEntry(entry);
+                }
+            } else {
+                // Standard path: apply to MVCC store normally
+                applyEntry(entry);
+            }
 
             // Complete pending client request
             CompletableFuture<Boolean> future = pendingRequests.remove(entry.index());
@@ -702,6 +852,20 @@ public class RaftNode {
         votedFor = null;
         leaderId = null;
         persistState();
+
+        // Cascade rollback: all speculative entries above commitIndex are invalid
+        if (oldRole == Role.LEADER && !speculativeCommitCallbacks.isEmpty()) {
+            log.info("[{}] Leadership lost — cascade rollback of speculative entries above commitIndex {}",
+                    config.getNodeId(), commitIndex);
+            int rolledBack = mvccStore.cascadeRollback(commitIndex + 1);
+
+            // Fail any pending speculative callbacks
+            speculativeCommitCallbacks.clear();
+
+            // Fail pending standard requests too
+            pendingRequests.forEach((idx, future) -> future.complete(false));
+            pendingRequests.clear();
+        }
 
         if (oldRole != Role.FOLLOWER) {
             log.info("[{}] Stepping down to FOLLOWER (term {})", config.getNodeId(), newTerm);
@@ -833,6 +997,13 @@ public class RaftNode {
 
     public Map<String, Long> getPeerLastSeen() { return Collections.unmodifiableMap(peerLastSeen); }
     public Map<String, Boolean> getPeerAliveMap() { return Collections.unmodifiableMap(peerAlive); }
+
+    // Write batching control (Reviewer Challenge §4: Baseline Fairness)
+    public boolean isBatchingEnabled() { return batchingEnabled; }
+    public void setBatchingEnabled(boolean enabled) {
+        this.batchingEnabled = enabled;
+        log.info("[{}] Write batching: {}", config.getNodeId(), enabled ? "ENABLED" : "DISABLED");
+    }
 
     /**
      * Immediately mark a peer as dead — used after a chaos kill is forwarded so the

@@ -9,15 +9,17 @@ import KvExplorer from './components/KvExplorer';
 import MetricsDashboard from './components/MetricsDashboard';
 import EventTimeline from './components/EventTimeline';
 import ChaosPanel from './components/ChaosPanel';
+import SpeculationPanel from './components/SpeculationPanel';
 import {
   Network, ScrollText, Database, BarChart3, Radio, Flame,
-  WifiOff, ChevronDown, Server, Skull, Activity,
+  WifiOff, ChevronDown, Server, Skull, Activity, Zap,
 } from 'lucide-react';
 
 const TABS = [
   { id: 'topology', label: 'Topology', icon: Network, description: 'Cluster visualization' },
   { id: 'logs', label: 'Raft Log', icon: ScrollText, description: 'Consensus log entries' },
   { id: 'kv', label: 'KV Store', icon: Database, description: 'Key-value operations' },
+  { id: 'speculation', label: 'Speculation', icon: Zap, description: 'Speculative MVCC Consensus' },
   { id: 'metrics', label: 'Metrics', icon: BarChart3, description: 'Performance monitoring' },
   { id: 'events', label: 'Events', icon: Radio, description: 'Real-time event stream' },
   { id: 'chaos', label: 'Chaos', icon: Flame, description: 'Fault injection testing' },
@@ -49,6 +51,7 @@ function App() {
       case 'topology': return <TopologyView />;
       case 'logs': return <RaftLogViewer />;
       case 'kv': return <KvExplorer />;
+      case 'speculation': return <SpeculationPanel />;
       case 'metrics': return <MetricsDashboard />;
       case 'events': return <EventTimeline />;
       case 'chaos': return <ChaosPanel />;

@@ -154,6 +154,38 @@ public class ClusterEvent {
                 Map.of("nodeId", nodeId));
     }
 
+    // ================================================================
+    // Speculative MVCC Events (Novel Contribution)
+    // ================================================================
+
+    public static ClusterEvent speculativeVersionCreated(String key, long timestamp,
+                                                          int valueSize, long raftLogIndex) {
+        return new ClusterEvent(Category.MVCC, "SPECULATIVE_VERSION_CREATED", null,
+                String.format("Speculative write: %s @ ts=%d (raftIdx=%d, %d bytes)",
+                        key, timestamp, raftLogIndex, valueSize),
+                Map.of("key", key, "timestamp", timestamp, "valueSize", valueSize,
+                        "raftLogIndex", raftLogIndex, "speculative", true));
+    }
+
+    public static ClusterEvent speculativeCommitted(String key, long timestamp) {
+        return new ClusterEvent(Category.MVCC, "SPECULATIVE_COMMITTED", null,
+                String.format("Speculative → COMMITTED: %s @ ts=%d", key, timestamp),
+                Map.of("key", key, "timestamp", timestamp, "speculative", false));
+    }
+
+    public static ClusterEvent speculativeRolledBack(String key, long timestamp) {
+        return new ClusterEvent(Category.MVCC, "SPECULATIVE_ROLLED_BACK", null,
+                String.format("Speculative → ROLLED_BACK: %s @ ts=%d", key, timestamp),
+                Map.of("key", key, "timestamp", timestamp, "rolledBack", true));
+    }
+
+    public static ClusterEvent cascadeRollback(int count, long fromRaftIndex) {
+        return new ClusterEvent(Category.MVCC, "CASCADE_ROLLBACK", null,
+                String.format("Cascade rollback: %d speculative versions (raftIdx ≥ %d)",
+                        count, fromRaftIndex),
+                Map.of("count", count, "fromRaftIndex", fromRaftIndex));
+    }
+
     private static String formatBytes(long bytes) {
         if (bytes < 1024) return bytes + " B";
         if (bytes < 1024 * 1024) return String.format("%.1f KB", bytes / 1024.0);

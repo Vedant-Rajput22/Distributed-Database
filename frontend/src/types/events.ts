@@ -64,6 +64,86 @@ export interface MvccVersion {
   timestamp: number;
   value: string | null;
   tombstone: boolean;
+  speculative?: boolean;
+  versionState?: 'SPECULATIVE' | 'COMMITTED' | 'ROLLED_BACK';
+}
+
+// ── Speculation Types ──
+
+export interface SpeculationMetrics {
+  speculationEnabled: boolean;
+  avgSpeculativeLatencyMs: number;
+  avgStandardLatencyMs: number;
+  avgPromotionLatencyMs: number;
+  speculativeWriteCount: number;
+  standardWriteCount: number;
+  pendingSpeculations: number;
+  mvccSpeculativeWrites: number;
+  mvccCommitPromotions: number;
+  mvccRollbacks: number;
+  mvccSpeculationSuccessRate: number;
+}
+
+export interface BenchmarkResult {
+  mode: string;
+  numOps: number;
+  concurrency: number;
+  valueSizeBytes: number;
+  standard?: LatencyReport;
+  speculative?: LatencyReport;
+  baselineOptimizations?: {
+    writeBatching: boolean;
+    batchWindowUs: number;
+    description: string;
+  };
+  error?: string;
+}
+
+export interface LatencyReport {
+  label: string;
+  totalOps: number;
+  successCount: number;
+  failCount: number;
+  totalTimeMs: number;
+  throughputOpsPerSec: number;
+  writeLatency?: PercentileStats;
+  promotionLatency?: PercentileStats;
+}
+
+export interface PercentileStats {
+  count: number;
+  p50Ms: number;
+  p75Ms: number;
+  p90Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  p999Ms: number;
+  minMs: number;
+  maxMs: number;
+  avgMs: number;
+}
+
+export interface GcStressResult {
+  numVersions: number;
+  rollbackPercent: number;
+  rolledBackCount: number;
+  committedCount: number;
+  createTimeMs: number;
+  rollbackTimeMs: number;
+  perVersionRollbackUs: number;
+  gc?: {
+    purgedCount: number;
+    gcDurationMs: number;
+    perVersionGcUs: number;
+  };
+  throughputComparison?: {
+    withoutGcOpsPerSec: number;
+    duringGcOpsPerSec: number;
+    throughputImpactPercent: number;
+    latencyWithoutGc?: PercentileStats;
+    latencyDuringGc?: PercentileStats;
+  };
+  verdict?: string;
 }
 
 export type EventCategory =

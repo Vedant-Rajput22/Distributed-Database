@@ -361,6 +361,17 @@ export default function KvExplorer() {
                           <span className="text-white/15 w-5">{i + 1}.</span>
                           <Clock className="w-3 h-3 text-white/20" />
                           <span className="text-white/30 w-40">{new Date(v.timestamp).toLocaleString()}</span>
+                          {v.versionState && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-md border font-semibold ${
+                              v.versionState === 'SPECULATIVE'
+                                ? 'text-amber-400 bg-amber-500/10 border-amber-500/20'
+                                : v.versionState === 'COMMITTED'
+                                ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                : 'text-red-400 bg-red-500/10 border-red-500/20'
+                            }`}>
+                              {v.versionState}
+                            </span>
+                          )}
                           <span className={v.tombstone ? 'text-red-400/70 line-through' : 'text-white/60'}>
                             {v.tombstone ? '(deleted)' : v.value}
                           </span>

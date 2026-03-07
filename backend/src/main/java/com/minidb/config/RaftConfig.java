@@ -32,6 +32,12 @@ public class RaftConfig {
     @Value("${minidb.mvcc.gc-interval-ms:60000}")
     private long mvccGcIntervalMs;
 
+    @Value("${minidb.speculation.enabled:true}")
+    private boolean speculationEnabled;
+
+    @Value("${minidb.speculation.timeout-ms:10000}")
+    private long speculationTimeoutMs;
+
     public String getNodeId() { return nodeId; }
     public List<String> getPeers() { return peers; }
     public int getElectionTimeoutMin() { return electionTimeoutMin; }
@@ -40,4 +46,6 @@ public class RaftConfig {
     public int getSnapshotInterval() { return snapshotInterval; }
     public long getMvccRetentionMs() { return mvccRetentionMs; }
     public long getMvccGcIntervalMs() { return mvccGcIntervalMs; }
+    public boolean isSpeculationEnabled() { return speculationEnabled; }
+    public long getSpeculationTimeoutMs() { return speculationTimeoutMs; }
 }

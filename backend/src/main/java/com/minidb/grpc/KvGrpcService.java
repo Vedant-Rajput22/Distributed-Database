@@ -4,6 +4,7 @@ import com.minidb.events.ClusterEvent;
 import com.minidb.events.EventBus;
 import com.minidb.mvcc.MvccStore;
 import com.minidb.raft.RaftNode;
+import com.minidb.speculation.SpeculativeManager;
 import com.minidb.proto.*;
 import io.grpc.stub.StreamObserver;
 import io.micrometer.core.instrument.Counter;
@@ -27,12 +28,16 @@ public class KvGrpcService extends KvServiceGrpc.KvServiceImplBase {
 
     private final RaftNode raftNode;
     private final EventBus eventBus;
+    private final SpeculativeManager speculativeManager;
     private final Counter kvOpsCounter;
     private final Timer kvLatencyTimer;
 
-    public KvGrpcService(RaftNode raftNode, EventBus eventBus, MeterRegistry meterRegistry) {
+    public KvGrpcService(RaftNode raftNode, EventBus eventBus,
+                         SpeculativeManager speculativeManager,
+                         MeterRegistry meterRegistry) {
         this.raftNode = raftNode;
         this.eventBus = eventBus;
+        this.speculativeManager = speculativeManager;
         this.kvOpsCounter = Counter.builder("kv_operations_total")
                 .description("Total KV operations")
                 .register(meterRegistry);
@@ -211,5 +216,76 @@ public class KvGrpcService extends KvServiceGrpc.KvServiceImplBase {
                     .build());
             responseObserver.onCompleted();
         }
+    }
+
+    // ================================================================
+    // Speculative MVCC Consensus gRPC Handlers
+    // ================================================================
+
+    @Override
+    public void speculativePut(SpeculativePutRequest request,
+                                StreamObserver<SpeculativePutResponse> responseObserver) {
+        kvOpsCounter.increment();
+
+        if (!raftNode.isLeader()) {
+            responseObserver.onNext(SpeculativePutResponse.newBuilder()
+                    .setSuccess(false)
+                    .setError("Not the leader. Leader: " + raftNode.getLeaderId())
+                    .build());
+            responseObserver.onCompleted();
+            return;
+        }
+
+        SpeculativeManager.SpeculativeResult result =
+                speculativeManager.submitSpeculativePut(raftNode,
+                        request.getKey(), request.getValue().toByteArray());
+
+        SpeculativePutResponse.Builder builder = SpeculativePutResponse.newBuilder()
+                .setSuccess(result.success())
+                .setSpeculative(result.speculative())
+                .setWriteLatencyMs(result.writeLatencyMs());
+
+        if (result.success()) {
+            builder.setTimestamp(result.timestamp())
+                   .setRaftLogIndex(result.raftLogIndex());
+        } else {
+            builder.setError(result.error());
+        }
+
+        responseObserver.onNext(builder.build());
+        responseObserver.onCompleted();
+    }
+
+    @Override
+    public void speculativeDelete(SpeculativeDeleteRequest request,
+                                   StreamObserver<SpeculativePutResponse> responseObserver) {
+        kvOpsCounter.increment();
+
+        if (!raftNode.isLeader()) {
+            responseObserver.onNext(SpeculativePutResponse.newBuilder()
+                    .setSuccess(false)
+                    .setError("Not the leader. Leader: " + raftNode.getLeaderId())
+                    .build());
+            responseObserver.onCompleted();
+            return;
+        }
+
+        SpeculativeManager.SpeculativeResult result =
+                speculativeManager.submitSpeculativeDelete(raftNode, request.getKey());
+
+        SpeculativePutResponse.Builder builder = SpeculativePutResponse.newBuilder()
+                .setSuccess(result.success())
+                .setSpeculative(result.speculative())
+                .setWriteLatencyMs(result.writeLatencyMs());
+
+        if (result.success()) {
+            builder.setTimestamp(result.timestamp())
+                   .setRaftLogIndex(result.raftLogIndex());
+        } else {
+            builder.setError(result.error());
+        }
+
+        responseObserver.onNext(builder.build());
+        responseObserver.onCompleted();
     }
 }

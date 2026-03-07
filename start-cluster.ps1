@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
-    Start the Mini Distributed Database cluster (3 nodes + React dashboard).
+    Start the Mini Distributed Database cluster (3 nodes + React dashboard + demo app).
 
 .DESCRIPTION
     Builds the backend (if needed), starts 3 Raft nodes as background processes,
-    installs frontend dependencies (if needed), and launches the Vite dev server.
+    installs frontend dependencies (if needed), launches the Vite dev server,
+    and optionally starts the RaftChat demo app.
     All logs are written to the logs/ directory.
 
 .PARAMETER Nodes
@@ -16,16 +17,21 @@
 .PARAMETER SkipFrontend
     Skip starting the frontend dashboard.
 
+.PARAMETER WithDemo
+    Also start the RaftChat demo app on port 4000.
+
 .EXAMPLE
     .\start-cluster.ps1
     .\start-cluster.ps1 -Nodes 5
     .\start-cluster.ps1 -SkipBuild
+    .\start-cluster.ps1 -WithDemo
 #>
 
 param(
     [int]$Nodes = 3,
     [switch]$SkipBuild,
-    [switch]$SkipFrontend
+    [switch]$SkipFrontend,
+    [switch]$WithDemo
 )
 
 $ErrorActionPreference = "Stop"
@@ -86,9 +92,11 @@ if (Test-Path $PIDFILE) {
         } catch { }
     }
     Remove-Item $PIDFILE -Force -ErrorAction SilentlyContinue
-    # Also kill frontend on port 3000
-    $fp = (Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess
-    if ($fp) { Stop-Process -Id $fp -Force -ErrorAction SilentlyContinue }
+    # Also kill frontend on port 3000 and demo app on port 4000
+    foreach ($devPort in @(3000, 4000)) {
+        $fp = (Get-NetTCPConnection -LocalPort $devPort -ErrorAction SilentlyContinue | Select-Object -First 1).OwningProcess
+        if ($fp) { Stop-Process -Id $fp -Force -ErrorAction SilentlyContinue }
+    }
     Start-Sleep -Seconds 2
 }
 
@@ -183,6 +191,32 @@ if (-not $SkipFrontend) {
     Write-Ok "Dashboard starting...  PID: $($frontendProc.Id)"
 }
 
+# --- Step 5: Start demo app (RaftChat) ---
+if ($WithDemo) {
+    $DEMOAPP = Join-Path $ROOT "demo-app"
+    if (Test-Path $DEMOAPP) {
+        Write-Step "Starting RaftChat demo app..."
+        Push-Location $DEMOAPP
+        if (-not (Test-Path "node_modules")) {
+            Write-Info "Installing demo-app dependencies (npm install)..."
+            & npm install --silent 2>$null
+        }
+        $demoLog = Join-Path $LOGS "demo-app.log"
+        $demoErrorLog = Join-Path $LOGS "demo-app-error.log"
+        $demoProc = Start-Process -FilePath "cmd.exe" `
+            -ArgumentList "/c", "npm run dev" `
+            -WorkingDirectory $DEMOAPP `
+            -RedirectStandardOutput $demoLog `
+            -RedirectStandardError $demoErrorLog `
+            -PassThru -WindowStyle Hidden
+        Pop-Location
+        $demoProc.Id | Out-File -FilePath $PIDFILE -Append -Encoding ascii
+        Write-Ok "RaftChat starting...  PID: $($demoProc.Id)"
+    } else {
+        Write-Info "demo-app/ directory not found. Skipping demo app."
+    }
+}
+
 # --- Summary ---
 Write-Host ""
 Write-Host "  +------------------------------------------+" -ForegroundColor Green
@@ -198,6 +232,9 @@ for ($i = 1; $i -le $Nodes; $i++) {
 }
 if (-not $SkipFrontend) {
     Write-Host "   Dashboard:    " -NoNewline; Write-Host "http://localhost:3000" -ForegroundColor Cyan
+}
+if ($WithDemo) {
+    Write-Host "   RaftChat:     " -NoNewline; Write-Host "http://localhost:4000" -ForegroundColor Cyan
 }
 Write-Host ""
 Write-Host "   Logs:         " -NoNewline; Write-Host "logs/" -ForegroundColor Yellow

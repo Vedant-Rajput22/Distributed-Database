@@ -7,6 +7,7 @@
 #   ./start-cluster.sh -n 5         # 5 nodes + dashboard
 #   ./start-cluster.sh --skip-build # skip Maven build
 #   ./start-cluster.sh --skip-ui    # skip frontend
+#   ./start-cluster.sh --with-demo  # also start RaftChat demo app
 #   ./start-cluster.sh --help
 
 set -euo pipefail
@@ -21,6 +22,7 @@ PIDFILE="$ROOT/.cluster-pids"
 NODES=3
 SKIP_BUILD=false
 SKIP_FRONTEND=false
+WITH_DEMO=false
 
 # ── Colors ──────────────────────────────────────────────
 CYAN='\033[0;36m'
@@ -41,11 +43,13 @@ while [[ $# -gt 0 ]]; do
         -n|--nodes)       NODES="$2"; shift 2 ;;
         --skip-build)     SKIP_BUILD=true; shift ;;
         --skip-ui)        SKIP_FRONTEND=true; shift ;;
+        --with-demo)      WITH_DEMO=true; shift ;;
         -h|--help)
             echo "Usage: $0 [-n NODES] [--skip-build] [--skip-ui]"
             echo "  -n, --nodes N     Number of nodes (1-5, default: 3)"
             echo "  --skip-build      Skip Maven build"
             echo "  --skip-ui         Skip starting the React dashboard"
+            echo "  --with-demo       Also start the RaftChat demo app (port 4000)"
             exit 0 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -88,9 +92,11 @@ if [[ -f "$PIDFILE" ]]; then
         fi
     done < "$PIDFILE"
     rm -f "$PIDFILE"
-    # Kill frontend on port 3000
-    fp=$(lsof -ti :3000 2>/dev/null || true)
-    [[ -n "$fp" ]] && kill -9 $fp 2>/dev/null
+    # Kill frontend on port 3000 and demo app on port 4000
+    for devport in 3000 4000; do
+        fp=$(lsof -ti :$devport 2>/dev/null || true)
+        [[ -n "$fp" ]] && kill -9 $fp 2>/dev/null
+    done
     sleep 2
 fi
 
@@ -160,6 +166,26 @@ if [[ "$SKIP_FRONTEND" == false ]]; then
     ok "Dashboard starting...  PID: $FPID"
 fi
 
+# ── Step 5: Demo app ────────────────────────────────────
+if [[ "$WITH_DEMO" == true ]]; then
+    DEMOAPP="$ROOT/demo-app"
+    if [[ -d "$DEMOAPP" ]]; then
+        step "Starting RaftChat demo app..."
+        cd "$DEMOAPP"
+        if [[ ! -d "node_modules" ]]; then
+            info "Installing demo-app dependencies (npm install)..."
+            npm install --silent 2>/dev/null
+        fi
+        npm run dev > "$LOGS/demo-app.log" 2>"$LOGS/demo-app-error.log" &
+        DPID=$!
+        echo "$DPID" >> "$PIDFILE"
+        cd "$ROOT"
+        ok "RaftChat starting...  PID: $DPID"
+    else
+        info "demo-app/ directory not found. Skipping demo app."
+    fi
+fi
+
 # ── Summary ─────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}  ┌──────────────────────────────────────────┐${NC}"
@@ -175,6 +201,9 @@ for (( i=1; i<=NODES; i++ )); do
 done
 if [[ "$SKIP_FRONTEND" == false ]]; then
     echo -e "   Dashboard:    ${CYAN}http://localhost:3000${NC}"
+fi
+if [[ "$WITH_DEMO" == true ]]; then
+    echo -e "   RaftChat:     ${CYAN}http://localhost:4000${NC}"
 fi
 echo ""
 echo -e "   Logs:         ${YELLOW}logs/${NC}"

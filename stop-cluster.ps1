@@ -69,15 +69,17 @@ foreach ($port in $clusterPorts) {
     }
 }
 
-# --- Also kill any node/npm dev server on port 3000 ---
-Write-Step "Checking for frontend dev server..."
-$frontendPid = (Get-NetTCPConnection -LocalPort 3000 -ErrorAction SilentlyContinue |
-    Select-Object -First 1).OwningProcess
-if ($frontendPid) {
-    Stop-Process -Id $frontendPid -Force -ErrorAction SilentlyContinue
-    Write-Ok "Stopped frontend dev server (PID $frontendPid)."
-} else {
-    Write-Info "No frontend dev server running on port 3000."
+# --- Also kill any node/npm dev server on port 3000 and demo app on port 4000 ---
+Write-Step "Checking for dev servers (dashboard + demo app)..."
+foreach ($devPort in @(3000, 4000)) {
+    $devPid = (Get-NetTCPConnection -LocalPort $devPort -ErrorAction SilentlyContinue |
+        Select-Object -First 1).OwningProcess
+    if ($devPid) {
+        Stop-Process -Id $devPid -Force -ErrorAction SilentlyContinue
+        Write-Ok "Stopped dev server on port $devPort (PID $devPid)."
+    } else {
+        Write-Info "No dev server running on port $devPort."
+    }
 }
 
 # Allow OS to release file handles

@@ -25,6 +25,8 @@ Thumbs.db
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+demo-app/node_modules/
+demo-app/dist/
 
 # Logs
 *.log

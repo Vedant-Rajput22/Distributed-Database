@@ -51,15 +51,17 @@ else
     pkill -f "mini-distributed-db" 2>/dev/null && ok "Killed java processes." || info "No matching java processes."
 fi
 
-# ── Kill frontend on port 3000 ──────────────────────────
-step "Checking for frontend dev server..."
-FPID=$(lsof -ti :3000 2>/dev/null || true)
-if [[ -n "$FPID" ]]; then
-    kill "$FPID" 2>/dev/null || true
-    ok "Stopped frontend dev server (PID $FPID)."
-else
-    info "No frontend dev server running on port 3000."
-fi
+# ── Kill dev servers (dashboard + demo app) ─────────────
+step "Checking for dev servers (dashboard + demo app)..."
+for devport in 3000 4000; do
+    DPID=$(lsof -ti :$devport 2>/dev/null || true)
+    if [[ -n "$DPID" ]]; then
+        kill "$DPID" 2>/dev/null || true
+        ok "Stopped dev server on port $devport (PID $DPID)."
+    else
+        info "No dev server running on port $devport."
+    fi
+done
 
 # ── Clean ───────────────────────────────────────────────
 if [[ "$CLEAN" == true ]]; then

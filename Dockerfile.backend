@@ -17,6 +17,9 @@ RUN mvn clean package -DskipTests -B
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
+# RocksDB JNI requires libstdc++ and snappy compression needs libstdc++
+RUN apk add --no-cache libstdc++ libgcc
+
 RUN addgroup -S minidb && adduser -S minidb -G minidb
 RUN mkdir -p /app/data && chown -R minidb:minidb /app
 

@@ -18,6 +18,12 @@ service KvService {
   rpc Delete(DeleteRequest) returns (DeleteResponse);
   // Range scan
   rpc Scan(ScanRequest) returns (ScanResponse);
+
+  // ---- Speculative MVCC Consensus (Novel) ----
+  // Speculative put: writes immediately, returns before consensus
+  rpc SpeculativePut(SpeculativePutRequest) returns (SpeculativePutResponse);
+  // Speculative delete: writes tombstone immediately, returns before consensus
+  rpc SpeculativeDelete(SpeculativeDeleteRequest) returns (SpeculativePutResponse);
 }
 
 message PutRequest {
@@ -70,4 +76,24 @@ message KvPair {
   string key = 1;
   bytes value = 2;
   int64 timestamp = 3;
+}
+
+// ---- Speculative MVCC Consensus Messages ----
+
+message SpeculativePutRequest {
+  string key = 1;
+  bytes value = 2;
+}
+
+message SpeculativeDeleteRequest {
+  string key = 1;
+}
+
+message SpeculativePutResponse {
+  bool success = 1;
+  bool speculative = 2;        // true if write is speculative (not yet committed)
+  int64 timestamp = 3;          // MVCC timestamp of the speculative version
+  int64 raft_log_index = 4;     // Raft log index for commit tracking
+  double write_latency_ms = 5;  // Local write latency in milliseconds
+  string error = 6;
 }

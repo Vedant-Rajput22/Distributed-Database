@@ -28,6 +28,9 @@ minidb:
   mvcc:
     retention-ms: ${MVCC_RETENTION_MS:300000}
     gc-interval-ms: ${MVCC_GC_INTERVAL_MS:60000}
+  speculation:
+    enabled: ${SPECULATION_ENABLED:true}
+    timeout-ms: ${SPECULATION_TIMEOUT_MS:10000}
 
 # Actuator & Prometheus
 management:
