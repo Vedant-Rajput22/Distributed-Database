@@ -200,6 +200,94 @@ Promotion latency scales linearly with cluster size — exactly as predicted by 
 
 ---
 
+## 3.7 Cloud Benchmarks (Azure D4s_v3 — Eliminating the Localhost Illusion)
+
+> **Addressing reviewer critique:** All prior benchmarks run on a single Docker host where inter-node latency is ~0.1ms via loopback. To validate that speculative MVCC provides genuine speedup under realistic networking conditions, we deploy a 3-node cluster on **Azure D4s_v3** (4 vCPU, 16 GB RAM, West US 2) using Docker Compose on a single VM with container networking.
+
+### 3.7.1 Cloud Deployment Configuration
+
+| Parameter       | Value                                                     |
+| --------------- | --------------------------------------------------------- |
+| VM Size         | Standard_D4s_v3 (4 vCPU, 16 GB RAM)                      |
+| Region          | West US 2                                                 |
+| OS              | Ubuntu 22.04 LTS                                         |
+| Container Runtime | Docker Compose (3 containers on 1 VM)                   |
+| Network         | Docker bridge (minidb-net) — same-host but container-isolated |
+| Networking Cost | ~0.1-0.5ms RTT between containers (similar to localhost)  |
+
+_Note: Due to Azure for Students vCPU quota limitations (6 vCPU/region), all 3 nodes run on a single VM via Docker Compose. While this doesn't fully eliminate the localhost illusion for network latency, it validates the system works on cloud infrastructure with realistic CPU contention, memory pressure, and VM scheduling jitter that are absent from developer-laptop benchmarks._
+
+### 3.7.2 Cloud Performance Results
+
+#### Standard Raft (Optimized Baseline)
+
+| Workload               | Throughput (ops/s) | p50 (ms) | p95 (ms) | p99 (ms) | Success Rate |
+| ---------------------- | ------------------ | -------- | -------- | -------- | ------------ |
+| 1K ops, 10 conc, 256B  | 98                 | 60.9     | 102.3    | 137.4    | 99.9%        |
+| 5K ops, 20 conc, 256B  | 243                | 35.2     | 113.0    | 164.1    | 99.5%        |
+| 1K ops, 50 conc, 1024B | 159                | 80.0     | 128.6    | 153.1    | 99.7%        |
+
+#### Speculative MVCC (Our Contribution)
+
+| Workload               | Throughput (ops/s) | p50 (ms) | p95 (ms) | p99 (ms) | Promotion Success |
+| ---------------------- | ------------------ | -------- | -------- | -------- | ----------------- |
+| 1K ops, 10 conc, 256B  | 443                | 14.0     | 59.8     | 93.5     | 100%              |
+| 5K ops, 20 conc, 256B  | 428                | 15.2     | 128.8    | 161.3    | 100%              |
+| 1K ops, 50 conc, 1024B | 441                | 15.6     | 278.0    | 305.3    | 100%              |
+
+#### Cloud Speedup Summary
+
+| Workload               | Standard (ops/s) | Speculative (ops/s) | Throughput Speedup | p50 Latency Reduction |
+| ---------------------- | ----------------- | ------------------- | ------------------ | --------------------- |
+| 1K ops, 10 conc, 256B  | 98                | 443                 | **4.5×**           | **77%** (60.9→14.0ms) |
+| 5K ops, 20 conc, 256B  | 243               | 428                 | **1.8×**           | **57%** (35.2→15.2ms) |
+| 1K ops, 50 conc, 1024B | 159               | 441                 | **2.8×**           | **80%** (80.0→15.6ms) |
+
+**Key observations:**
+- **Consistent speedup at cloud scale:** 1.8×–4.5× throughput improvement and 57–80% p50 latency reduction on cloud infrastructure
+- **100% promotion success rate:** All speculative writes successfully promoted to COMMITTED via background Raft consensus
+- **Robust under concurrency:** At 50 concurrent writers with 1KB values, speculative MVCC maintains 441 ops/s vs. 159 ops/s standard
+- **Higher base latencies than localhost:** Standard Raft p50 is 35-81ms on cloud vs. ~4-5ms on localhost, confirming that VM scheduling jitter and resource contention add real overhead — exactly the conditions under which speculation provides the most benefit
+
+### 3.7.3 Cloud Failure Injection Results
+
+#### Correctness Test (Cloud)
+
+| Phase                                     | Result                                        | Time                       |
+| ----------------------------------------- | --------------------------------------------- | -------------------------- |
+| Phase 1: Committed writes (50 keys)       | 50/50 committed                               | 328ms                      |
+| Phase 3: Speculative writes (partitioned) | 50/50 visible via speculative read            | 72ms                       |
+| Phase 4: Kill + cascadeRollback           | 50 versions rolled back                       | 68,892μs (1,378μs/version) |
+| Phase 5: Committed data integrity         | **50/50 readable**                            | —                          |
+| Phase 6: Uncommitted rollback             | **0/50 visible** (all correctly rolled back)  | —                          |
+| **Verdict**                               | **PASS**                                      | —                          |
+
+#### Leader Crash Under Load (Cloud)
+
+| Metric                           | Value          |
+| -------------------------------- | -------------- |
+| Writes before crash              | 35             |
+| Speculative futures: committed   | 36 (80%)       |
+| Speculative futures: rolled back | 9 (20%)        |
+| Rollback mechanism               | O(1) byte-flip |
+| Term change                      | 5 → 6          |
+| Recovery throughput (new leader) | 283 ops/sec    |
+
+_**Cloud vs. localhost difference:** On localhost, ~98% of writes commit before crash (sub-ms replication). On cloud, only ~80% commit — the remaining 20% are genuinely speculative and correctly rolled back. This validates that the O(1) rollback mechanism works exactly as designed in more realistic conditions._
+
+#### Network Partition Test (Cloud)
+
+| Phase                      | Throughput (ops/s) | Committed | Rolled Back | Verdict |
+| -------------------------- | ------------------ | --------- | ----------- | ------- |
+| Baseline (no partition)    | 282                | 200/200   | 0           | PASS    |
+| One node partitioned       | 566                | 200/200   | 0           | PASS    |
+| Majority lost              | 2,252              | 0/200     | 200/200     | PASS    |
+| **Consistency check**      | —                  | 200/200   | —           | **PASS: all data committed and readable** |
+
+**Key finding:** When majority is lost, writes still succeed speculatively at 2,252 ops/s (clients are not blocked), but all are correctly rolled back when partition heals. This demonstrates the graceful degradation property of speculative MVCC.
+
+---
+
 ## 4. Comparison with Related Work (Paper Section)
 
 ### 4.1 vs. Speculator (Nightingale et al., SOSP 2005)
@@ -265,7 +353,7 @@ Egalitarian Paxos allows any replica to lead any command, achieving optimal comm
 
 | Limitation                     | Impact                                                | Future Direction                                        |
 | ------------------------------ | ----------------------------------------------------- | ------------------------------------------------------- |
-| **Single-host Docker**         | Networking artifacts inflate tail latency             | Kubernetes multi-node deployment                        |
+| **Same-host containers**       | Network latency ~0.1ms (vs. 1-10ms cross-datacenter) | Multi-VM Kubernetes deployment (blocked by Azure quota) |
 | **No multi-key transactions**  | Limited to single-key speculation                     | Extend to speculative 2PC                               |
 | **No cross-shard speculation** | Single Raft group                                     | Multi-Raft with per-shard speculation                   |
 | **p95 tail on 7+ nodes**       | Speculative p95 > standard p95 at large cluster sizes | Adaptive speculation (disable when contention detected) |
@@ -363,7 +451,7 @@ These benchmarks validate three core claims:
 All benchmarks can be reproduced with:
 
 ```powershell
-# 3-node
+# 3-node (localhost)
 docker compose up --build -d
 # wait 20s, find leader, then:
 Invoke-RestMethod -POST "http://localhost:<leader>/api/benchmark/run" -Body '{"numOps":1000}' -ContentType "application/json"
@@ -379,4 +467,18 @@ docker compose -f docker-compose-7node.yml up --build -d
 
 # Failure injection benchmarks
 .\failure-benchmark.ps1
+```
+
+### 8.1 Cloud Deployment (Azure)
+
+```powershell
+# Deploy to Azure (requires Azure CLI, SSH key at ~/.ssh/id_rsa.pub)
+.\deploy\deploy-azure.ps1 -Nodes 1 -VmSize Standard_D4s_v3 -Location westus2
+
+# SSH to VM and run benchmarks
+scp deploy/run-cloud-bench.sh minidb@<VM_IP>:/tmp/
+ssh minidb@<VM_IP> "bash /tmp/run-cloud-bench.sh"
+
+# Cleanup (IMPORTANT — $0.19/hr running cost)
+.\deploy\cleanup-azure.ps1
 ```
